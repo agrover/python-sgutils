@@ -9,4 +9,6 @@ for more info.
 
 Code condition: alpha.
 
+License: BSD 3-clause
+
 to build, type 'python setup.py build'.
