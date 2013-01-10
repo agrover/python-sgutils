@@ -66,7 +66,8 @@ readcap_10(PyObject *self, PyObject *args)
 	int sg_fd;
 	const char *sg_name;
 	int ret;
-	char resp_buff[RESP_BUFF_LEN];
+	unsigned int last_blk_addr, block_size;
+	unsigned char resp_buff[RESP_BUFF_LEN];
 
 	if (!PyArg_ParseTuple(args, "s", &sg_name)) {
 		return NULL;
@@ -81,10 +82,18 @@ readcap_10(PyObject *self, PyObject *args)
 	memset(resp_buff, 0, sizeof(resp_buff));
 
 	ret = sg_ll_readcap_10(sg_fd, 0, 0, &resp_buff, RESP_BUFF_LEN, 0, 0);
-	if (ret == 0)
-		printf("yay!\n");
-	else
+	if (ret == 0) {
+		last_blk_addr = ((resp_buff[0] << 24) | (resp_buff[1] << 16) |
+				 (resp_buff[2] << 8) | resp_buff[3]);
+		printf("last_blk_addr %x\n", last_blk_addr);
+		if (0xffffffff != last_blk_addr) {
+			block_size = ((resp_buff[4] << 24) | (resp_buff[5] << 16) |
+				      (resp_buff[6] << 8) | resp_buff[7]);
+			printf("block_size 0x%x\n", block_size);
+		}
+	} else {
 		printf("boo! %d\n", ret);
+	}
 
 	close_device(sg_fd);
 
