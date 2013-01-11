@@ -34,6 +34,8 @@
 #include <Python.h>
 #include <fcntl.h>
 #include <scsi/sg_cmds.h>
+#define __STDC_FORMAT_MACROS 1
+#include <inttypes.h>
 
 /* Returns >= 0 if successful, otherwise returns negated errno. */
 static int open_device(const char *device_name)
@@ -58,16 +60,23 @@ int close_device(int device_fd)
 	return res;
 }
 
-#define RESP_BUFF_LEN 8
+#define RESP_BUFF_LEN 32
+
+static char readcap_doc[] =
+"Returns the result of READ CAPACITY(16), as a tuple.\n"
+"See SCSI SBC-3 spec for more info:\n"
+"(last_logical_block_address, logical_block_length, p_type, prot_en,\n"
+" p_i_exponent, lbppbe, lbpme, lbprz, lalba)";
 
 static PyObject *
-readcap_10(PyObject *self, PyObject *args)
+readcap(PyObject *self, PyObject *args)
 {
 	int sg_fd;
 	const char *sg_name;
 	int ret;
-	unsigned int last_blk_addr, block_size;
+	uint64_t llast_blk_addr, block_size;
 	unsigned char resp_buff[RESP_BUFF_LEN];
+	int k, prot_en, p_type, lbpme, lbprz, lbppbe, lalba, p_i_exponent;
 
 	if (!PyArg_ParseTuple(args, "s", &sg_name)) {
 		return NULL;
@@ -81,28 +90,37 @@ readcap_10(PyObject *self, PyObject *args)
 
 	memset(resp_buff, 0, sizeof(resp_buff));
 
-	ret = sg_ll_readcap_10(sg_fd, 0, 0, &resp_buff, RESP_BUFF_LEN, 0, 0);
-	if (ret == 0) {
-		last_blk_addr = ((resp_buff[0] << 24) | (resp_buff[1] << 16) |
-				 (resp_buff[2] << 8) | resp_buff[3]);
-		printf("last_blk_addr %x\n", last_blk_addr);
-		if (0xffffffff != last_blk_addr) {
-			block_size = ((resp_buff[4] << 24) | (resp_buff[5] << 16) |
-				      (resp_buff[6] << 8) | resp_buff[7]);
-			printf("block_size 0x%x\n", block_size);
-		}
-	} else {
-		printf("boo! %d\n", ret);
+	ret = sg_ll_readcap_16(sg_fd, 0, 0, &resp_buff, RESP_BUFF_LEN, 0, 0);
+	if (ret < 0) {
+		PyErr_SetString(PyExc_IOError, "SCSI command failed");
+		close_device(sg_fd);
+		return NULL;
 	}
 
 	close_device(sg_fd);
 
-	Py_INCREF(Py_None);
-	return Py_None;
+	for (k = 0, llast_blk_addr = 0; k < 8; ++k) {
+		llast_blk_addr <<= 8;
+		llast_blk_addr |= resp_buff[k];
+	}
+	block_size = ((resp_buff[8] << 24) | (resp_buff[9] << 16) |
+		      (resp_buff[10] << 8) | resp_buff[11]);
+	p_type = ((resp_buff[12] >> 1) & 0x7);
+	prot_en = !!(resp_buff[12] & 0x1);
+	p_i_exponent = (resp_buff[13] >> 4);
+	lbppbe = resp_buff[13] & 0xf;
+	lbpme = !!(resp_buff[14] & 0x80);
+	lbprz = !!(resp_buff[14] & 0x40);
+	lalba = ((resp_buff[14] & 0x3f) << 8) + resp_buff[15];
+
+	return Py_BuildValue("(kkkkkkkkk)", llast_blk_addr, block_size,
+			     p_type, prot_en, p_i_exponent, lbppbe, lbpme,
+			     lbprz, lalba);
 }
 
 static PyMethodDef sgutils_methods[] = {
-	{ "readcap_10",		(PyCFunction)readcap_10, METH_VARARGS },
+	{ "readcap",	readcap, METH_VARARGS,
+	readcap_doc},
 	{ NULL,	     NULL}	   /* sentinel */
 };
 
