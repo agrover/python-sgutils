@@ -244,10 +244,76 @@ py_err:
 	return NULL;
 }
 
+
+static char report_luns_doc[] =
+"Returns the result of REPORT LUNS.\n"
+"Currently only non-hierarchical LUNs are supported.\n"
+"See SCSI SPC-3 and SAM-5 specs for more info.";
+
+#define REPORT_LUNS_MAX_COUNT 256
+#define LUN_SIZE 8
+
+static PyObject *
+spc_report_luns(PyObject *self, PyObject *args)
+{
+	int sg_fd;
+	const char *sg_name;
+	int ret;
+	unsigned char rbuf[REPORT_LUNS_MAX_COUNT * LUN_SIZE];
+	int i;
+	PyObject *tuple;
+	int luns;
+	int off;
+
+	if (!PyArg_ParseTuple(args, "s", &sg_name)) {
+		return NULL;
+	}
+
+	sg_fd = sg_cmds_open_device(sg_name, 1, 0);
+	if (sg_fd < 0) {
+		PyErr_SetString(PyExc_IOError, "Could not open device");
+		return NULL;
+	}
+
+	memset(&rbuf, 0, sizeof(rbuf));
+
+	/* only report=0 for now */
+	ret = sg_ll_report_luns(sg_fd, 0, rbuf, sizeof(rbuf), 0, 0);
+	if (ret < 0) {
+		PyErr_SetString(PyExc_IOError, "SCSI command failed");
+		sg_cmds_close_device(sg_fd);
+		return NULL;
+	}
+
+	sg_cmds_close_device(sg_fd);
+
+	luns = ((rbuf[0] << 24) + (rbuf[1] << 16) +
+		(rbuf[2] << 8) + rbuf[3]) / LUN_SIZE;
+
+	tuple = PyTuple_New(luns);
+	if (!tuple)
+		return NULL;
+
+	/* 
+	 * Currently only support non-hierarchical LUNs up to 256.
+	 * In this (easy) case, LUN is at byte 1 in the 8-bytes.
+	 */
+	for (i = 0, off = 8; i < luns; i++, off += LUN_SIZE) {
+		int lun;
+
+		lun = rbuf[off+1];
+
+		PyTuple_SET_ITEM(tuple, i, PyInt_FromLong(lun));
+	}
+
+	return tuple;
+}
+
 static PyMethodDef sgutils_methods[] = {
 	{ "inquiry", spc_inquiry, METH_VARARGS, inquiry_doc},
 	{ "sense", spc_sense, METH_VARARGS, sense_doc},
 	{ "readcap", sbc_readcap, METH_VARARGS, readcap_doc},
+	{ "report_luns", spc_report_luns, METH_VARARGS, report_luns_doc},
 	{ NULL,	     NULL}	   /* sentinel */
 };
 
