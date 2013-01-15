@@ -157,7 +157,7 @@ spc_inquiry(PyObject *self, PyObject *args)
 		);
 }
 
-static char sense_doc[] =
+static char mode_sense_doc[] =
 "Returns the result of MODE SENSE(10), as a dictionary of sense mode codes\n"
 " to page code data.\n"
 "See SCSI SPC-3 spec for more info.";
@@ -165,7 +165,7 @@ static char sense_doc[] =
 #define PG_CODE_MAX 0x3f
 
 static PyObject *
-spc_sense(PyObject *self, PyObject *args)
+spc_mode_sense(PyObject *self, PyObject *args)
 {
 	int sg_fd;
 	const char *sg_name;
@@ -311,7 +311,7 @@ spc_report_luns(PyObject *self, PyObject *args)
 
 static PyMethodDef sgutils_methods[] = {
 	{ "inquiry", spc_inquiry, METH_VARARGS, inquiry_doc},
-	{ "sense", spc_sense, METH_VARARGS, sense_doc},
+	{ "mode_sense", spc_mode_sense, METH_VARARGS, mode_sense_doc},
 	{ "readcap", sbc_readcap, METH_VARARGS, readcap_doc},
 	{ "report_luns", spc_report_luns, METH_VARARGS, report_luns_doc},
 	{ NULL,	     NULL}	   /* sentinel */
