@@ -314,6 +314,15 @@ static PyMethodDef sgutils_methods[] = {
 	{ "mode_sense", spc_mode_sense, METH_VARARGS, mode_sense_doc},
 	{ "readcap", sbc_readcap, METH_VARARGS, readcap_doc},
 	{ "report_luns", spc_report_luns, METH_VARARGS, report_luns_doc},
+#if 0
+	/* TODO */
+	{ "format_unit", x, METH_VARARGS, x}, /* for DIF support */
+	{ "persistent_reserve", x, METH_VARARGS, x},
+	{ "unmap", sbc_unmap, METH_VARARGS, unmap_doc}, /* use v2? */
+	/* newer stuff */
+	{ "extended_copy", x, METH_VARARGS, x},
+	{ "receive_copy_results", x, METH_VARARGS, x},
+#endif
 	{ NULL,	     NULL}	   /* sentinel */
 };
 
