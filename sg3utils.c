@@ -34,10 +34,12 @@
 #include <Python.h>
 #include <fcntl.h>
 #include <scsi/sg_cmds.h>
+#include <scsi/sg_lib.h>
 #define __STDC_FORMAT_MACROS 1
 #include <inttypes.h>
 
-#define READCAP_RESP_BUFF_LEN 32
+#define MX_ALLOC_LEN (0xc000 + 0x80)
+static unsigned char rsp_buff[MX_ALLOC_LEN + 2];
 
 static char readcap_doc[] =
 "Returns the result of READ CAPACITY(16), as a tuple.\n"
@@ -52,7 +54,6 @@ sbc_readcap(PyObject *self, PyObject *args)
 	const char *sg_name;
 	int ret;
 	uint64_t llast_blk_addr, block_size;
-	unsigned char resp_buff[READCAP_RESP_BUFF_LEN];
 	int k, prot_en, p_type, lbpme, lbprz, lbppbe, lalba, p_i_exponent;
 
 	if (!PyArg_ParseTuple(args, "s", &sg_name)) {
@@ -65,9 +66,9 @@ sbc_readcap(PyObject *self, PyObject *args)
 		return NULL;
 	}
 
-	memset(resp_buff, 0, sizeof(resp_buff));
+	memset(rsp_buff, 0, sizeof(rsp_buff));
 
-	ret = sg_ll_readcap_16(sg_fd, 0, 0, &resp_buff, sizeof(resp_buff), 0, 0);
+	ret = sg_ll_readcap_16(sg_fd, 0, 0, &rsp_buff, sizeof(rsp_buff), 0, 0);
 	if (ret < 0) {
 		PyErr_SetString(PyExc_IOError, "SCSI command failed");
 		sg_cmds_close_device(sg_fd);
@@ -78,42 +79,29 @@ sbc_readcap(PyObject *self, PyObject *args)
 
 	for (k = 0, llast_blk_addr = 0; k < 8; ++k) {
 		llast_blk_addr <<= 8;
-		llast_blk_addr |= resp_buff[k];
+		llast_blk_addr |= rsp_buff[k];
 	}
-	block_size = ((resp_buff[8] << 24) | (resp_buff[9] << 16) |
-		      (resp_buff[10] << 8) | resp_buff[11]);
-	p_type = ((resp_buff[12] >> 1) & 0x7);
-	prot_en = !!(resp_buff[12] & 0x1);
-	p_i_exponent = (resp_buff[13] >> 4);
-	lbppbe = resp_buff[13] & 0xf;
-	lbpme = !!(resp_buff[14] & 0x80);
-	lbprz = !!(resp_buff[14] & 0x40);
-	lalba = ((resp_buff[14] & 0x3f) << 8) + resp_buff[15];
+	block_size = ((rsp_buff[8] << 24) | (rsp_buff[9] << 16) |
+		      (rsp_buff[10] << 8) | rsp_buff[11]);
+	p_type = ((rsp_buff[12] >> 1) & 0x7);
+	prot_en = !!(rsp_buff[12] & 0x1);
+	p_i_exponent = (rsp_buff[13] >> 4);
+	lbppbe = rsp_buff[13] & 0xf;
+	lbpme = !!(rsp_buff[14] & 0x80);
+	lbprz = !!(rsp_buff[14] & 0x40);
+	lalba = ((rsp_buff[14] & 0x3f) << 8) + rsp_buff[15];
 
 	return Py_BuildValue("(kkbbbbbbb)", llast_blk_addr, block_size,
 			     p_type, prot_en, p_i_exponent, lbppbe, lbpme,
 			     lbprz, lalba);
 }
 
-static char inquiry_doc[] =
-"Returns the result of INQUIRY, as a tuple.\n"
-"See SCSI SPC-3 spec for more info:\n"
-"(vendor, product, revision, peripheral_qualifier, peripheral_type,\n"
-" rmb, version, NormACA, HiSup, response_data_format, sccs, acc,\n"
-" tpgs, 3pc, protect, BQue, EncServ, MultiP, MChngr, Addr16, WBus16,\n"
-" sync, linked, CmdQue)";
-
 static PyObject *
-spc_inquiry(PyObject *self, PyObject *args)
+spc_simple_inquiry(const char *sg_name)
 {
 	int sg_fd;
-	const char *sg_name;
 	int ret;
 	struct sg_simple_inquiry_resp inq_data;
-
-	if (!PyArg_ParseTuple(args, "s", &sg_name)) {
-		return NULL;
-	}
 
 	sg_fd = sg_cmds_open_device(sg_name, 1, 0);
 	if (sg_fd < 0) {
@@ -155,6 +143,200 @@ spc_inquiry(PyObject *self, PyObject *args)
 			     ((inq_data.byte_7 >> 3) & 0x1),	/* linked */
 			     ((inq_data.byte_7 >> 1) & 0x1)	/* CmdQue */
 		);
+}
+
+static PyObject *
+spc_inq_0x80(const char *sg_name)
+{
+	int ret;
+	int sg_fd;
+
+	sg_fd = sg_cmds_open_device(sg_name, 1, 0);
+	if (sg_fd < 0) {
+		PyErr_SetString(PyExc_IOError, "Could not open device");
+		return NULL;
+	}
+
+	memset(&rsp_buff, 0, sizeof(rsp_buff));
+
+	ret = sg_ll_inquiry(sg_fd, 0, 1, 0x80, rsp_buff, sizeof(rsp_buff),
+			    0, 0);
+	if (ret < 0) {
+		PyErr_SetString(PyExc_IOError, "SCSI command failed");
+		sg_cmds_close_device(sg_fd);
+		return NULL;
+	}
+
+	sg_cmds_close_device(sg_fd);
+
+	return Py_BuildValue("s#", &rsp_buff[4], rsp_buff[3]);
+}
+
+static const char * assoc_arr[] =
+{
+    "Addressed logical unit",
+    "Target port",      /* that received request; unless SCSI ports VPD */
+    "Target device that contains addressed lu",
+    "Reserved [0x3]",
+};
+
+static const char * code_set_arr[] =
+{
+    "Reserved [0x0]",
+    "Binary",
+    "ASCII",
+    "UTF-8",
+    "Reserved [0x4]", "Reserved [0x5]", "Reserved [0x6]", "Reserved [0x7]",
+    "Reserved [0x8]", "Reserved [0x9]", "Reserved [0xa]", "Reserved [0xb]",
+    "Reserved [0xc]", "Reserved [0xd]", "Reserved [0xe]", "Reserved [0xf]",
+};
+
+static const char * desig_type_arr[] =
+{
+    "vendor specific [0x0]",
+    "T10 vendor identification",
+    "EUI-64 based",
+    "NAA",
+    "Relative target port",
+    "Target port group",        /* spc4r09: _primary_ target port group */
+    "Logical unit group",
+    "MD5 logical unit identifier",
+    "SCSI name string",
+    "Protocol specific port identifier",  /* spc4r36 */
+    "Reserved [0xa]", "Reserved [0xb]",
+    "Reserved [0xc]", "Reserved [0xd]", "Reserved [0xe]", "Reserved [0xf]",
+};
+
+static PyObject *
+decode_vpd83_descriptor(const unsigned char * ip, int i_len,
+			int p_id, int c_set, int piv, int assoc,
+			int desig_type, int long_out, int print_assoc)
+{
+	char b[64];
+	PyObject *tuple;
+
+	tuple = PyTuple_New(5);
+	if (!tuple)
+		return NULL;
+
+	PyTuple_SetItem(tuple, 0, PyString_FromString(assoc_arr[assoc]));
+	PyTuple_SetItem(tuple, 1, PyString_FromString(desig_type_arr[desig_type]));
+	PyTuple_SetItem(tuple, 2, PyString_FromString(code_set_arr[c_set]));
+	if (piv && ((1 == assoc) || (2 == assoc))) {
+		sg_get_trans_proto_str(p_id, sizeof(b), b);
+		PyTuple_SetItem(tuple, 3, PyString_FromString(b));
+	} else {
+		PyTuple_SetItem(tuple, 3, PyString_FromString("N/A"));
+	}
+
+	PyTuple_SetItem(tuple, 4, Py_BuildValue("s#", ip, i_len));
+
+	return tuple;
+}
+
+static PyObject *
+spc_inq_0x83(const char *sg_name)
+{
+	int ret;
+	int sg_fd;
+	int assoc, i_len, c_set, piv, p_id, desig_type;
+	int off, u;
+	const unsigned char * ucp;
+	int len;
+	unsigned char *id_buff;
+	PyObject *list;
+
+	sg_fd = sg_cmds_open_device(sg_name, 1, 0);
+	if (sg_fd < 0) {
+		PyErr_SetString(PyExc_IOError, "Could not open device");
+		return NULL;
+	}
+
+	memset(&rsp_buff, 0, sizeof(rsp_buff));
+
+	ret = sg_ll_inquiry(sg_fd, 0, 1, 0x83, rsp_buff, sizeof(rsp_buff),
+			    0, 0);
+	if (ret < 0) {
+		PyErr_SetString(PyExc_IOError, "SCSI command failed");
+		sg_cmds_close_device(sg_fd);
+		return NULL;
+	}
+
+	sg_cmds_close_device(sg_fd);
+
+	len = ((rsp_buff[2] << 8) + rsp_buff[3]) + 4;
+	if (len > sizeof(rsp_buff)) {
+		PyErr_SetString(PyExc_IOError, "Return data too long");
+		return NULL;
+	}
+
+	list = PyList_New(0);
+
+	off = -1;
+	id_buff = rsp_buff + 4;
+	
+	while ((u = sg_vpd_dev_id_iter(id_buff, (len - 4), &off, -1, -1, -1)) == 0) {
+		PyObject *desc;
+
+		ucp = id_buff + off;
+		i_len = ucp[3];
+		if ((off + i_len + 4) > len) {
+			PyErr_SetString(PyExc_IOError,
+				"VPD page error: designator length longer "
+				"than remaining response length");
+			return NULL;
+		}
+
+		assoc = ((ucp[1] >> 4) & 0x3);
+		p_id = ((ucp[0] >> 4) & 0xf);
+		c_set = (ucp[0] & 0xf);
+		piv = ((ucp[1] & 0x80) ? 1 : 0);
+		desig_type = (ucp[1] & 0xf);
+		desc = decode_vpd83_descriptor(ucp + 4, i_len, p_id, c_set,
+					       piv, assoc, desig_type, 0, 0);
+		if (!desc) {
+			Py_DECREF(list);
+			return NULL;
+		}
+
+		if (PyList_Append(list, desc)) {
+			Py_DECREF(list);
+			return NULL;
+		}
+	}
+
+	return list;
+}
+
+static char inquiry_doc[] =
+"Returns the result of INQUIRY, as a tuple.\n"
+"See SCSI SPC-3 spec for more info:\n"
+"(vendor, product, revision, peripheral_qualifier, peripheral_type,\n"
+" rmb, version, NormACA, HiSup, response_data_format, sccs, acc,\n"
+" tpgs, 3pc, protect, BQue, EncServ, MultiP, MChngr, Addr16, WBus16,\n"
+" sync, linked, CmdQue)";
+
+static PyObject *
+spc_inquiry(PyObject *self, PyObject *args)
+{
+	const char *sg_name;
+	int page = 0;
+
+	if (!PyArg_ParseTuple(args, "s|i", &sg_name, &page)) {
+		return NULL;
+	}
+
+	switch (page) {
+	case 0:
+		return spc_simple_inquiry(sg_name);
+	case 0x80:
+		return spc_inq_0x80(sg_name);
+	case 0x83:
+		return spc_inq_0x83(sg_name);
+	default:
+		PyErr_SetString(PyExc_IOError, "Unsupported VPD page");
+		return NULL;
+	}
 }
 
 static char mode_sense_doc[] =
