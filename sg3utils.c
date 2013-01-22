@@ -309,12 +309,25 @@ spc_inq_0x83(const char *sg_name)
 }
 
 static char inquiry_doc[] =
-"Returns the result of INQUIRY, as a tuple.\n"
+"Returns the result of INQUIRY.\n"
 "See SCSI SPC-3 spec for more info:\n"
+"Called with a single devname argument, returns a tuple of basic INQUIRY:\n"
+"Example: inquiry(\"/dev/sda\") ->\n"
 "(vendor, product, revision, peripheral_qualifier, peripheral_type,\n"
 " rmb, version, NormACA, HiSup, response_data_format, sccs, acc,\n"
 " tpgs, 3pc, protect, BQue, EncServ, MultiP, MChngr, Addr16, WBus16,\n"
-" sync, linked, CmdQue)";
+" sync, linked, CmdQue)\n\n"
+"Called with devname and page arguments, returns tuple of that page's\n"
+" information.\n"
+"Example: inquiry(\"/dev/sda\", 0x80)\n"
+"Currently supported pages:\n\n"
+"0x80: Unit serial number\n"
+"  Returns a string of the unit serial number.\n\n"
+"0x83: Device information\n"
+"  Returns a list of identification descriptors.\n"
+"  Each element is a tuple containing association, identifier type,\n"
+"  code set, transport protocol identifier or \"N/A\", and the identifier\n"
+"  itself as a string.\n";
 
 static PyObject *
 spc_inquiry(PyObject *self, PyObject *args)
