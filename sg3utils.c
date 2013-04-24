@@ -511,6 +511,8 @@ static PyMethodDef sgutils_methods[] = {
 	{ "report_luns", spc_report_luns, METH_VARARGS, report_luns_doc},
 #if 0
 	/* TODO */
+	{ "send_diag", x, METH_VARARGS, x},
+	{ "recv_diag", x, METH_VARARGS, x},
 	{ "format_unit", x, METH_VARARGS, x}, /* for DIF support */
 	{ "persistent_reserve", x, METH_VARARGS, x},
 	{ "unmap", sbc_unmap, METH_VARARGS, unmap_doc}, /* use v2? */
