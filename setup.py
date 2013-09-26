@@ -5,7 +5,7 @@ libsgutils = Extension('sgutils',
                     libraries= ['sgutils2'])
 
 setup (name = 'sgutils',
-       version = '0.1',
+       version = '0.2.1',
        description = 'Python binding for sg3_utils',
        maintainer='Andy Grover',
        maintainer_email='andy@groveronline.com',
