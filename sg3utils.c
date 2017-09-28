@@ -123,7 +123,8 @@ spc_simple_inquiry(const char *sg_name)
 	return Py_BuildValue("(sssbbbbbbbbbbbbbbbbbbbbb)", inq_data.vendor,
 			     inq_data.product, inq_data.revision,
 			     inq_data.peripheral_qualifier,
-			     inq_data.peripheral_type, inq_data.rmb,
+			     inq_data.peripheral_type,
+			     !!(0x80 & inq_data.byte_1),
 			     inq_data.version,
 			     ((inq_data.byte_3 >> 5) & 0x1),	/* NormACA */
 			     ((inq_data.byte_3 >> 4) & 0x1),	/* HiSup */
